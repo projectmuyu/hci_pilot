@@ -677,7 +677,12 @@ async function syncDefaultPool(force){
     const old = S.photos.find(p => p.id === id);
     if (old){ Object.assign(old, {tags, contains, addedAt:i}); await DB.put(old); keep.add(id); }
     else {
-      const blob = await fetch(POOL_DIR + 'photos/' + encodeURIComponent(name)).then(x => x.ok ? x.blob() : null).catch(() => null);
+      // 일시적인 서버 오류(503 등)는 조금 기다렸다가 두 번 더 받아 본다
+      let blob = null;
+      for (let t = 0; t < 3 && !blob; t++){
+        if (t) await pause(800 * t);
+        blob = await fetch(POOL_DIR + 'photos/' + encodeURIComponent(name)).then(x => x.ok ? x.blob() : null).catch(() => null);
+      }
       const thumb = blob && await shrink(blob, THUMB_EDGE);
       if (thumb){ const rec = {id, name, tags, contains, blob, thumb, addedAt:i, fromPool:true}; await DB.put(rec); S.photos.push(rec); keep.add(id); }
       else failed++;
