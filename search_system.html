@@ -361,10 +361,12 @@ const usable = () => S.photos.filter(p => !isExcluded(p));
 // 방·침대 자체를 가리키는 말은 점수에 넣지 않음 ("차분한 방"의 "방"이 자취방·다락방에 걸리지 않게)
 const ROOM_WORDS = new Set(['방','방을','방이','침실','원룸','투룸','자취방','거실','집','인테리어','사진','room','rooms','bedroom','interior','photo','침대','bed','beds','벽','천장','공간','컬러','color','오피스텔']);
 // 이어 주는 말과 뜻이 너무 넓은 말은 태그로 찾을 수 없으니 없는 셈 친다 (화이트 앤 우드, 우드 가구, 따뜻한 느낌)
+// 낱말 속에 우연히 든 말은 일치로 보지 않는다 (테이블 ≠ 턴테이블)
+const NOT_INSIDE = {'테이블': ['턴테이블'], 'table': ['turntable']};
 const FILLER_WORDS = new Set(['앤','and','&','및','그리고','옆','큰','가구','느낌','스타일','분위기','같은']);
 function tokenize(q){
   const neg = [], pos = [];
-  const rest = q.toLowerCase().replace(/(\S+?)\s*(없는|없이|빼고|제외|말고)/g, (_, w) => { neg.push(w); return ' '; });
+  const rest = q.toLowerCase().replace(/(1인|1인용|일인용)\s*(소파|쇼파)/g, '의자').replace(/(\S+?)\s*(없는|없이|빼고|제외|말고)/g, (_, w) => { neg.push(w); return ' '; });
   rest.split(/[\s,]+/).filter(Boolean).forEach(t => {
     if (t.startsWith('-') && t.length > 1){ neg.push(t.slice(1)); return; }
     if (ROOM_WORDS.has(t) || FILLER_WORDS.has(t)) return;
@@ -385,7 +387,8 @@ function runSearch(q, seed, chips){
     // 태그가 검색어를 품으면 1점, 검색어가 태그를 품기만 하면 0.5점 (턴테이블 → 테이블)
     // 한 글자 검색어는 태그·동의어와 똑같을 때만 (비 → 텔레비전, 큰 → 큰창문 같은 오탐 방지)
     const part = t => t.length >= 2 && idx.some(g => g.length >= 2 && t.includes(g));
-    return t => t.length < 2 ? (idx.includes(t) ? 1 : 0) : idx.some(g => g.includes(t)) ? 1 : part(t) ? .5 : 0;
+    const has = t => idx.some(g => g.includes(t) && !(NOT_INSIDE[t] || []).includes(g));
+    return t => t.length < 2 ? (idx.includes(t) ? 1 : 0) : has(t) ? 1 : part(t) ? .5 : 0;
   };
   const skip = ALT2 ? alt2Seen() : P.hidden;
   const scored = usable().filter(p => !skip.includes(p.id)).map(p => {
