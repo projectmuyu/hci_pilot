@@ -6,6 +6,7 @@
 
 - `search_system.html` 하나. 빌드 없음.
 - `pool/pool.csv` + `pool/photos/*.jpg`: 기본 사진 풀(200장). http(s)로 열면(GitHub Pages 등) 페이지가 시작할 때 `syncDefaultPool()`로 이 브라우저의 IndexedDB에 맞춰 넣는다. 파일로 열면(file://) 브라우저가 막아서 건너뛰고, 그때는 `풀 불러오기`(ZIP)로 넣는다. 로컬 확인은 `python -m http.server`로 띄워서 한다.
+- 사진 파일 이름은 `R001`~`R200`이고, 번호는 작업 폴더 `index.json`의 번호와 같다. 예전 이름과 출처는 `pool/rename_map.csv`(`file, old_pool_file, original_file, source`)에 있다. 사진 id가 파일 이름에서 나오므로 이름을 바꾸면 그 전 기록은 사진과 연결이 끊긴다.
 - 맨 위에 반드시 `<!doctype html>`, `<html lang="ko">`, `<meta charset="utf-8">`가 있어야 한다(없으면 로컬에서 열 때 한글이 깨진다).
 - 외부 의존성은 JSZip(cdnjs, ZIP 내보내기·불러오기)과 Google Fonts(IBM Plex Sans KR / Mono)뿐이다. 둘 다 없어도 핵심 기능은 동작한다.
 
