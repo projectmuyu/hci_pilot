@@ -103,7 +103,7 @@ label.field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(
 .empty{padding:40px 20px;text-align:center;color:var(--muted)}
 .modal{position:fixed;inset:0;background:rgba(10,14,12,.62);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px}
 .modal .panel{background:var(--surface);border-radius:12px;max-width:1000px;width:100%;max-height:100%;overflow:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
-.modal .panel>img{width:100%;border-radius:8px;display:block}
+.modal .panel>img{width:100%;border-radius:8px;display:block;min-height:0;object-fit:contain} /* 세로 사진도 스크롤 없이 사진과 버튼이 함께 보이게 */
 .pick-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
 .pick{border:2px solid transparent;border-radius:10px;padding:0;background:none;cursor:pointer;overflow:hidden}
 .pick[aria-pressed=true]{border-color:var(--accent)}
@@ -132,7 +132,7 @@ body.search-mode .topbar{display:none}
 .g-top{display:flex;align-items:center;gap:20px;padding-block:18px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap}
 .g-top .g-form{width:min(640px,100%)}
 .g-grid{display:flex;flex-wrap:wrap;gap:8px}
-.g-item{height:190px;flex:1 1 250px;border:0;padding:0;border-radius:8px;overflow:hidden;background:var(--sunk);cursor:pointer;max-width:100%}
+.g-item{height:190px;flex:1 1 250px;border:0;padding:0;border-radius:8px;overflow:hidden;background:var(--sunk);max-width:100%}
 .g-item img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
 .g-item:hover img{transform:scale(1.03)}
 .g-fill{flex:10 1 0;height:0}
@@ -143,15 +143,15 @@ a.btn{text-decoration:none;display:inline-block}
 
 /* likes · saved · final */
 .g-item{position:relative}
-.g-open{border:0;padding:0;margin:0;width:100%;height:100%;background:none;cursor:pointer;display:block}
+.g-open{border:0;padding:0;margin:0;width:100%;height:100%;background:none;cursor:zoom-in;display:block}
 .g-like{position:absolute;top:8px;right:8px;width:38px;height:38px;border-radius:50%;border:0;display:grid;place-items:center;cursor:pointer;background:rgba(255,255,255,.88);color:#8a948f;box-shadow:0 1px 4px rgba(0,0,0,.18);transition:transform .12s}
 .g-like:hover{transform:scale(1.08)}
 .g-like.on{background:var(--accent);color:var(--accent-ink)}
-.g-zoom{position:absolute;bottom:8px;right:8px;width:34px;height:34px;border-radius:50%;border:0;display:grid;place-items:center;cursor:zoom-in;background:rgba(255,255,255,.88);color:#3a4440}
-.g-check{position:absolute;top:8px;left:8px;width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:none;place-items:center;font-weight:700}
+.g-check{position:absolute;top:8px;left:8px;width:38px;height:38px;border-radius:50%;border:2px solid #8a948f;display:grid;place-items:center;cursor:pointer;background:rgba(255,255,255,.88);color:transparent;font-size:18px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.18);transition:transform .12s}
+.g-check:hover{transform:scale(1.08);border-color:var(--accent)}
+.g-check.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .g-pick .g-item{outline:3px solid transparent;outline-offset:-3px}
 .g-pick .g-item.sel{outline-color:var(--accent)}
-.g-pick .g-item.sel .g-check{display:grid}
 .g-saved{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 16px;cursor:pointer;font-weight:600;color:var(--muted);white-space:nowrap}
 .g-saved.has{color:var(--accent);border-color:var(--accent)}
 .g-saved b{font-family:var(--f-mono);min-width:1.4em;text-align:center}
@@ -162,6 +162,7 @@ a.btn{text-decoration:none;display:inline-block}
 .g-btn:disabled{opacity:.45;cursor:not-allowed}
 .g-like-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--accent);background:var(--surface);color:var(--accent);border-radius:999px;padding:9px 18px;cursor:pointer;font-weight:600;white-space:nowrap}
 .g-like-btn.on{background:var(--accent);color:var(--accent-ink)}
+.g-like-btn:disabled{opacity:.45;cursor:not-allowed}
 .g-confirm{max-width:720px}
 .g-confirm h2{font-size:22px}
 .g-done{display:flex;flex-direction:column;align-items:center;gap:14px;padding-block:40px;text-align:center}
@@ -177,7 +178,7 @@ a.btn{text-decoration:none;display:inline-block}
 .g-strip img{width:160px;aspect-ratio:3/2;object-fit:cover;border-radius:6px;border:3px solid transparent}
 .g-strip figure.fin img{border-color:var(--accent)}
 .g-strip figcaption{font-size:11px;color:var(--muted);word-break:break-all}
-@media (prefers-reduced-motion:reduce){.g-like{transition:none}}
+@media (prefers-reduced-motion:reduce){.g-like,.g-check{transition:none}}
 
 .arch h3{font-size:18px}
 .arch-label{width:min(240px,100%)!important;padding:6px 10px!important;font-size:17px;font-weight:700}
@@ -682,7 +683,7 @@ function toggleLike(id){
   if (P.final) return;
   const i = P.liked.indexOf(id);
   const qs = P.queries || [], qn = qs.length;
-  const where = P.view === 'saved' ? '모아 보기' : (document.querySelector('.modal') ? '크게 보기' : '검색 결과');
+  const where = document.querySelector('.modal') ? '크게 보기' : P.view === 'saved' ? '모아 보기' : '검색 결과';
   (P.likeLog = P.likeLog || []).push({action: i >= 0 ? '빼기' : '담기', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where});
   if (i >= 0) P.liked.splice(i, 1); else P.liked.push(id);
   if (!P.startedAt) P.startedAt = new Date().toISOString();
@@ -698,8 +699,8 @@ function syncLikes(){
 const savedBtn = () => `<button class="g-saved ${P.liked.length ? 'has' : ''}" id="to-saved" type="button">${HEART}<span>마음에 든 사진</span><b class="g-saved-count">${P.liked.length}</b></button>`;
 function tile(p, mode){
   return `<div class="g-item${mode==='pick' && P._sel===p.id ? ' sel' : ''}" data-id="${p.id}">
-    <button class="g-open" type="button" aria-label="${mode==='pick' ? '이 사진 고르기' : '크게 보기'}"><img loading="lazy" alt="방 사진" src="${urlFor(p,'thumb')}"></button>
-    ${mode==='pick' ? `<button class="g-zoom" type="button" data-zoom="${p.id}" aria-label="크게 보기"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 0 1 5.2 10.4l4.4 4.4-1.4 1.4-4.4-4.4A6.5 6.5 0 1 1 10.5 4zm0 2a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9z" fill="currentColor"/></svg></button><span class="g-check" aria-hidden="true">✓</span>` : ''}
+    <button class="g-open" type="button" aria-label="크게 보기"><img loading="lazy" alt="방 사진" src="${urlFor(p,'thumb')}"></button>
+    ${mode==='pick' ? `<button class="g-check${P._sel===p.id ? ' on' : ''}" type="button" data-pick="${p.id}" aria-pressed="${P._sel===p.id}" aria-label="이 사진 고르기">✓</button>` : ''}
     <button class="g-like${isLiked(p.id) ? ' on' : ''}" type="button" data-like="${p.id}" aria-pressed="${isLiked(p.id)}">${HEART}</button>
   </div>`;
 }
@@ -751,23 +752,34 @@ function drawResults(){
   $('#more').hidden = S.results.length <= S.resultLimit;
 }
 
+const pickHint = () => P._sel ? '고른 사진: 1장' : '왼쪽 위 동그라미를 눌러 한 장을 고르세요';
+// 고른 사진 표시를 사진 위 버튼, 크게 보기 팝업, 아래 결정 줄에 함께 맞춘다
+function syncPick(){
+  $$('[data-pick]').forEach(b => {
+    const id = b.dataset.pick, on = P._sel === id;
+    b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
+    if (b.id === 'pick-this'){ b.disabled = !isLiked(id); b.textContent = on ? '✓ 고른 사진' : '이 사진 고르기'; }
+  });
+  $$('#saved .g-item').forEach(t => t.classList.toggle('sel', t.dataset.id === P._sel));
+  const d = $('#decide'); if (d) d.disabled = !P._sel;
+  const h = $('#sel-hint'); if (h) h.textContent = pickHint();
+}
+function togglePick(id){ P._sel = P._sel === id ? null : id; savePick(); syncPick(); }
 function renderSavedUI(){
   const list = P.liked.map(photoById).filter(Boolean);
-  if (P._sel && !P.liked.includes(P._sel)) P._sel = null;
+  if (P._sel && !P.liked.includes(P._sel)){ P._sel = null; savePick(); }
   $('#main').innerHTML = `<div class="g-top">
       <button class="btn" id="back" type="button">← 검색으로 돌아가기</button>
       <h1 class="g-title">마음에 든 사진 <span class="mono">${list.length}</span></h1></div>
     ${list.length ? `<p class="muted g-guide">이 중에서 다음에 혼자 지낼 방으로 가장 마음에 드는 사진 한 장을 골라 주세요. 하트를 누르면 목록에서 빠져요.</p>
       <div class="g-grid g-pick" id="saved">${list.map(p => tile(p, 'pick')).join('')}<span class="g-fill"></span></div>
-      <div class="g-decide"><span class="muted" id="sel-hint">${P._sel ? '고른 사진: 1장' : '사진을 눌러 한 장을 고르세요'}</span><button class="g-btn" id="decide" type="button" ${P._sel ? '' : 'disabled'}>이 사진으로 결정</button></div>`
+      <div class="g-decide"><span class="muted" id="sel-hint">${pickHint()}</span><button class="g-btn" id="decide" type="button" ${P._sel ? '' : 'disabled'}>이 사진으로 결정</button></div>`
     : `<div class="empty">아직 담은 사진이 없어요.<br>검색 결과에서 하트를 눌러 마음에 드는 사진을 담아 보세요.</div>`}`;
   $('#back').onclick = () => { P.view = 'search'; savePick(); renderSearchUI(); };
   const box = $('#saved'); if (!box) return;
   fitTiles(box); bindLikeButtons(box);
-  $$('.g-item', box).forEach(t => {
-    t.querySelector('.g-open').onclick = () => { P._sel = t.dataset.id; savePick(); $$('.g-item', box).forEach(x => x.classList.toggle('sel', x === t)); $('#decide').disabled = false; $('#sel-hint').textContent = '고른 사진: 1장'; };
-  });
-  $$('[data-zoom]', box).forEach(b => b.onclick = e => { e.stopPropagation(); openPreview(b.dataset.zoom, list, true); });
+  $$('.g-item', box).forEach(t => t.querySelector('.g-open').onclick = () => openPreview(t.dataset.id, list, true));
+  $$('[data-pick]', box).forEach(b => b.onclick = () => togglePick(b.dataset.pick));
   $('#decide').onclick = confirmFinal;
 }
 function confirmFinal(){
@@ -812,16 +824,22 @@ function openPreview(id, list, fromSaved){
   m.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="이미지 크게 보기">
     <img alt="방 사진" src="${urlFor(p,'full')}">
     <div class="row between"><div class="row"><button class="btn sm" data-nav="-1" ${i <= 0 ? 'disabled' : ''}>← 이전</button><button class="btn sm" data-nav="1" ${i >= list.length - 1 ? 'disabled' : ''}>다음 →</button></div>
-    <div class="row"><button class="btn" data-close type="button">닫기</button>${fromSaved ? `<button class="g-btn" id="pick-this" type="button">이 사진 고르기</button>` : `<button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>`}</div></div></div>`;
-  const close = () => { m.remove(); document.removeEventListener('keydown', onKey); };
-  const go = d => { const n = list[i + d]; if (n){ close(); openPreview(n.id, list, fromSaved); } };
+    <div class="row"><button class="btn" data-close type="button">닫기</button><button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>${fromSaved ? `<button class="g-like-btn" id="pick-this" type="button" data-pick="${id}"></button>` : ''}</div></div></div>`;
+  const drop = () => { m.remove(); document.removeEventListener('keydown', onKey); };
+  // 모아 보기에서 연 팝업: 하트를 끄고 켠 결과는 팝업을 닫을 때 목록에 반영한다 (닫기 전에는 되돌릴 수 있게)
+  const close = () => {
+    drop();
+    if (fromSaved && Array.from($$('#saved .g-item')).map(t => t.dataset.id).join() !== P.liked.join()){ const y = window.scrollY; renderSearchUI(); window.scrollTo(0, y); }
+  };
+  const go = d => { const n = list[i + d]; if (n){ drop(); openPreview(n.id, list, fromSaved); } };
   const onKey = e => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1); };
   m.onclick = e => { if (e.target === m || e.target.dataset.close != null) close(); };
   $$('[data-nav]', m).forEach(b => b.onclick = () => go(Number(b.dataset.nav)));
-  $$('[data-like]', m).forEach(b => b.onclick = () => toggleLike(id));
-  const pk = $('#pick-this', m); if (pk) pk.onclick = () => { P._sel = id; savePick(); close(); renderSearchUI(); };
+  $$('[data-like]', m).forEach(b => b.onclick = () => { toggleLike(id); if (fromSaved){ if (P._sel === id && !isLiked(id)){ P._sel = null; savePick(); } syncPick(); } });
+  const pk = $('#pick-this', m); if (pk) pk.onclick = () => togglePick(id);
   document.addEventListener('keydown', onKey);
   document.body.appendChild(m);
+  if (fromSaved) syncPick();
 }
 
 /* 연구자 화면: 최근 참여자 결과 */
