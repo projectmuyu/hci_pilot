@@ -27,6 +27,7 @@
    - 결과 사진의 하트 = "마음에 든 사진"에 담기/빼기. 사진을 누르면 크게 보기 모달이 열리고(포인터는 돋보기), 모달에서도 담을 수 있다.
    - `마음에 든 사진 N` 버튼 → 모아 보기 → 왼쪽 위 동그라미로 한 장 선택(한 장만, 다시 누르면 해제) → `이 사진으로 결정` → 확인 모달 → 완료 화면. 모아 보기에서도 사진을 누르면 크게 보기이고, 모달에는 하트와 `이 사진 고르기`가 함께 있으며 눌러도 닫히지 않는다. 모달에서 끈 하트는 모달을 닫을 때 목록에 반영한다.
    - 결과 사진에 마우스를 올리면 왼쪽 위에 `✕`가 나타난다(크게 보기 모달에는 `이 사진 안 보기`). 누르면 그 자리에 흐리게 남고 다음 검색부터 나오지 않는다. 담은 사진은 제외할 수 없고 제외한 사진은 담을 수 없다. 제외한 사진이 있으면 상단 `제외한 사진 N`에서 목록을 보고 되돌린다. 세션 동안 유지되고 새 참여자는 초기화된다.
+   - 검색한 말이 둘 이상이면 검색창 아래에 칩 줄이 나온다(친 말 그대로 한 칩, 같은 말은 하나, 최근 순, 맞는 사진이 없던 말도 포함). 칩을 켜고 끄면 결과가 바뀌고 검색창에 켜진 칩이 이어 보인다. 2개 이상 켜지면 모든 칩의 모든 단어에 맞는 사진만 보여 주고 채우지 않는다(0장이면 안내). 1개면 직접 친 검색과 같다. 새 검색어를 치면 그 말만 켜진다. 켜진 칩(`S.active`)은 저장하지 않아 새로고침하면 처음 화면으로 돌아간다. `queries`에는 직접 친 검색만 쌓인다.
    - 완료 화면의 "연구자에게 알려 주세요." 문구를 누르면 연구자 화면으로 돌아간다. 다른 화면에서는 Ctrl+Shift+R 또는 오른쪽 아래 작은 점(연구자 패널)으로 나간다.
    - 참여자 화면에는 다운로드 버튼이 없고 담기 개수 제한도 없다(둘 다 의도된 것).
 
@@ -36,7 +37,7 @@
 | --- | --- | --- |
 | IndexedDB | DB `room-search-pool`, store `photos` | 사진 레코드 `{id, name, tags[], contains[], blob, thumb, addedAt, fromPool?}`. blob은 긴 변 1600px JPEG, thumb은 420px. 기본 풀 사진은 `fromPool: true`, id는 `pool_` + 파일 이름 해시라 다시 맞춰도 기록의 사진 참조가 유지된다 |
 | localStorage | `rs_pool_ver` | 마지막으로 맞춘 `pool/pool.csv`의 해시. 바뀌면 다음 시작 때 태그를 갱신하고 새 사진을 받고, 빠진 기본 풀 사진은 지운다(연구자가 직접 넣은 사진은 그대로) |
-| localStorage | `rs_pick` | 진행 중 참여자 `P`: `{pid, liked[], hidden[], hideLog[], final, view, active, _sel, startedAt, finishedAt, queries[], likeLog[], archivedId}` |
+| localStorage | `rs_pick` | 진행 중 참여자 `P`: `{pid, liked[], hidden[], hideLog[], filterLog[], final, view, active, _sel, startedAt, finishedAt, queries[], likeLog[], archivedId}` |
 | localStorage | `rs_archive` | 참여자 기록 배열 `ARCH`. 고치기 전에 `reloadArch()`로 다른 창의 최신 기록부터 읽는다 |
 | localStorage | `rs_researcher` | 이 PC의 진행자 이름. 새 기록의 `researcher`, CSV 열, 내보내기 파일 이름에 붙는다 |
 | localStorage | `rs_pool_ping` | IndexedDB를 고칠 때마다 바꾸는 신호. 다른 창이 받아 사진 풀을 다시 읽는다 |
@@ -53,9 +54,10 @@
   "queries": [{"q": "아늑한 침실", "at": "ISO"}],
   "liked": [{"id": "…", "name": "J11_의현.jpg", "qn": 1, "q": "아늑한 침실", "likedAt": "ISO"}],
   "final": {"id": "…", "name": "J01_연수.jpg"},
-  "likeLog": [{"action": "담기 | 빼기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 모아 보기"}],
+  "likeLog": [{"action": "담기 | 빼기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 모아 보기", "active": ["그때 켜진 칩"]}],
   "hidden": [{"id": "…", "name": "R010.jpg", "qn": 2, "q": "야경", "hiddenAt": "ISO"}],
-  "hideLog": [{"action": "제외 | 되돌리기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 제외 목록"}]
+  "hideLog": [{"action": "제외 | 되돌리기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 제외 목록", "active": ["그때 켜진 칩"]}],
+  "filterLog": [{"action": "켜기 | 끄기", "q": "우드", "active": ["화이트", "우드"], "results": 31, "at": "ISO"}]
 }
 ```
 
@@ -64,7 +66,7 @@
 - `queries`는 검색 버튼/Enter를 누를 때마다 쌓이고, 최종 결정 뒤에는 쌓이지 않는다.
 - `liked[].qn/q`는 그 사진을 **마지막으로 담은** 검색이다.
 
-CSV 열: `no, researcher, participant_id, status, started_at, finished_at, query_count, queries, liked_count, liked_with_query, unliked_count, final_query, liked_files, final_file, final_in_liked_order, hidden_count, hidden_with_query, restored_count`. 예전 기록에는 `hidden`·`hideLog`가 없다. 한 칸 안의 여러 값은 ` | `로 잇고, `liked_with_query`는 `사진@검색번호:검색어` 형식이다.
+CSV 열: `no, researcher, participant_id, status, started_at, finished_at, query_count, queries, liked_count, liked_with_query, unliked_count, final_query, liked_files, final_file, final_in_liked_order, hidden_count, hidden_with_query, restored_count, filter_count`. 예전 기록에는 `hidden`·`hideLog`·`filterLog`가 없다. 한 칸 안의 여러 값은 ` | `로 잇고, `liked_with_query`는 `사진@검색번호:검색어` 형식이다.
 
 ## 검색 동작
 

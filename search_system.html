@@ -131,6 +131,11 @@ body.search-mode .topbar{display:none}
 .g-btn{border:0;background:var(--accent);color:var(--accent-ink);border-radius:999px;padding:9px 20px;cursor:pointer;font-weight:600;white-space:nowrap}
 .g-top{display:flex;align-items:center;gap:20px;padding-block:18px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap}
 .g-top .g-form{width:min(640px,100%)}
+.g-chips{display:flex;gap:8px;overflow-x:auto;width:100%;padding:2px;scrollbar-width:thin}
+.g-home .g-chips{width:min(640px,100%)}
+.g-chip{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:6px 14px;cursor:pointer;font-weight:600;font-size:14px;white-space:nowrap}
+.g-chip:hover{border-color:var(--accent);color:var(--accent)}
+.g-chip.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .g-grid{display:flex;flex-wrap:wrap;gap:8px}
 .g-item{height:190px;flex:1 1 250px;border:0;padding:0;border-radius:8px;overflow:hidden;background:var(--sunk);max-width:100%}
 .g-item img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .2s}
@@ -371,8 +376,10 @@ function tokenize(q){
   });
   return {pos, neg:[...new Set(neg)]};
 }
-function runSearch(q, seed){
-  const {pos, neg} = tokenize(q);
+// chips를 주면(칩 2개 이상) 그 모든 말에 맞는 사진만 돌려주고, 나머지 사진으로 채우지 않는다
+function runSearch(q, seed, chips){
+  const parts = (chips || [q]).map(tokenize);
+  const pos = parts.flatMap(x => x.pos), neg = [...new Set(parts.flatMap(x => x.neg))];
   const matcher = p => {
     const idx = searchIndex(p);
     // 태그가 검색어를 품으면 1점, 검색어가 태그를 품기만 하면 0.5점 (턴테이블 → 테이블)
@@ -392,11 +399,17 @@ function runSearch(q, seed){
   scored.forEach(x => { x.count = x.each.filter(v => v > 0).length; x.score = x.each.reduce((a,v) => a + v, 0); });
   // 맞는 단어가 많은 사진부터, 같으면 점수순. 모든 단어가 맞는 사진이 언제나 먼저 온다
   const hits = scored.filter(x => x.count > 0).sort((a,b) => b.count - a.count || b.score - a.score || a.tie - b.tie);
+  const targetsOf = () => TARGETS.filter(t => S.settings.targets.includes(t.id) && t.kw.some(k => norm(q).includes(norm(k)))).map(t => t.id);
+  if (chips && pos.length){
+    const all = hits.filter(x => x.count === pos.length);
+    // 0장이면 어떤 칩이 원인인지 찾는다: 그 칩 하나만으로도 맞는 사진이 없으면 칩 이름을 알려 준다
+    const blocked = all.length ? [] : chips.filter((_, i) => parts[i].pos.length && !scored.some(x => { const m = matcher(x.p); return parts[i].pos.every(forms => forms.some(m)); }));
+    return {list: all.map(x => x.p), hits: all.length, full: all.length, missing: [], padded: false, pos, neg, targetTerms: targetsOf(), strict: true, blocked};
+  }
   const full = wanted ? hits.filter(x => x.count === wanted).length : 0;
   let list = hits, padded = false;
   if (hits.length < 12){ padded = true; list = hits.concat(scored.filter(x => x.count === 0).sort((a,b) => a.tie - b.tie).slice(0, 24 - hits.length)); }
-  const targetTerms = TARGETS.filter(t => S.settings.targets.includes(t.id) && t.kw.some(k => norm(q).includes(norm(k)))).map(t => t.id);
-  return {list: list.map(x => x.p), hits: hits.length, full, missing, padded, pos, neg, targetTerms};
+  return {list: list.map(x => x.p), hits: hits.length, full, missing, padded, pos, neg, targetTerms: targetsOf()};
 }
 
 /* ================= 렌더 ================= */
@@ -685,9 +698,10 @@ async function syncDefaultPool(force){
 const photoById = id => S.photos.find(p => p.id === id);
 // 참여자 진행 상태: 마음에 든 사진, 최종 사진, 지금 보는 화면 (새로고침해도 유지)
 const PICK_KEY = 'rs_pick';
-const pickDefault = () => ({liked: [], hidden: [], hideLog: [], final: null, view: 'search', startedAt: null, finishedAt: null});
+const pickDefault = () => ({liked: [], hidden: [], hideLog: [], filterLog: [], final: null, view: 'search', startedAt: null, finishedAt: null});
 const P = Object.assign(pickDefault(), LS.get(PICK_KEY, {}));
 const savePick = () => LS.set(PICK_KEY, P);
+S.active = []; // 지금 켜진 칩(검색한 말). 새로고침하면 처음 화면으로 돌아가므로 저장하지 않는다
 const reloadPick = () => { Object.keys(P).forEach(k => delete P[k]); Object.assign(P, pickDefault(), LS.get(PICK_KEY, {})); };
 const isLiked = id => P.liked.includes(id);
 const isHidden = id => P.hidden.includes(id);
@@ -696,7 +710,7 @@ function toggleLike(id){
   const i = P.liked.indexOf(id);
   const qs = P.queries || [], qn = qs.length;
   const where = document.querySelector('.modal') ? '크게 보기' : P.view === 'saved' ? '모아 보기' : '검색 결과';
-  (P.likeLog = P.likeLog || []).push({action: i >= 0 ? '빼기' : '담기', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where});
+  (P.likeLog = P.likeLog || []).push({action: i >= 0 ? '빼기' : '담기', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where, active: S.active.slice()});
   if (i >= 0) P.liked.splice(i, 1); else P.liked.push(id);
   if (!P.startedAt) P.startedAt = new Date().toISOString();
   savePick(); syncLikes(); syncHides();
@@ -706,7 +720,7 @@ function toggleHide(id){
   if (P.final || (isLiked(id) && !isHidden(id))) return;
   const i = P.hidden.indexOf(id), qs = P.queries || [], qn = qs.length;
   const where = document.querySelector('.modal') ? '크게 보기' : P.view === 'hidden' ? '제외 목록' : '검색 결과';
-  P.hideLog.push({action: i >= 0 ? '되돌리기' : '제외', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where});
+  P.hideLog.push({action: i >= 0 ? '되돌리기' : '제외', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where, active: S.active.slice()});
   if (i >= 0) P.hidden.splice(i, 1); else P.hidden.push(id);
   if (!P.startedAt) P.startedAt = new Date().toISOString();
   savePick(); syncHides();
@@ -740,6 +754,30 @@ function fitTiles(box){
 function bindHideButtons(root){ $$('[data-hide]', root).forEach(b => b.onclick = e => { e.stopPropagation(); toggleHide(b.dataset.hide); if (P.view === 'hidden') renderSearchUI(); }); }
 function bindLikeButtons(root){ $$('[data-like]', root).forEach(b => b.onclick = e => { e.stopPropagation(); toggleLike(b.dataset.like); if (P.view === 'saved') renderSearchUI(); }); }
 
+// 칩: 지금까지 검색한 말. 같은 말은 하나로, 최근에 검색한 말부터
+const chipList = () => [...new Set((P.queries || []).map(x => x.q).reverse())];
+function chipsHTML(){
+  const list = chipList(); if (list.length < 2) return '';
+  return `<div class="g-chips" id="chips" role="group" aria-label="지금까지 검색한 말">${list.map((q, i) => `<button class="g-chip${S.active.includes(q) ? ' on' : ''}" type="button" data-chip="${i}" aria-pressed="${S.active.includes(q)}">${esc(q)}</button>`).join('')}</div>`;
+}
+function applyActive(){
+  if (!S.active.length){ S.lastQuery = ''; S.results = []; S.resultInfo = null; return; }
+  S.lastQuery = S.active.join(' '); S.resultLimit = 30;
+  S.resultInfo = runSearch(S.lastQuery, 'pilot', S.active.length > 1 ? S.active : null);
+  S.results = S.resultInfo.list;
+}
+function toggleChip(q){
+  if (P.final) return;
+  const on = S.active.includes(q);
+  S.active = on ? S.active.filter(x => x !== q) : S.active.concat(q);
+  applyActive();
+  P.filterLog.push({action: on ? '끄기' : '켜기', q, active: S.active.slice(), results: S.results.length, at: new Date().toISOString()});
+  if (!P.startedAt) P.startedAt = new Date().toISOString();
+  savePick();
+  const row = $('#chips'), x = row ? row.scrollLeft : 0; // 칩 줄의 스크롤 위치를 유지한다
+  renderSearchUI(); window.scrollTo(0,0);
+  const again = $('#chips'); if (again) again.scrollLeft = x;
+}
 function renderSearchUI(){
   document.body.classList.add('search-mode');
   $('#brand').textContent = ''; $('#topright').innerHTML = '';
@@ -749,19 +787,20 @@ function renderSearchUI(){
   if (P.view === 'hidden') return renderHiddenUI();
   if (!S.lastQuery){
     $('#main').innerHTML = `<div class="g-bar g-bar-home">${savedBtn()}</div><div class="g-home">
-      <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off"><button class="g-btn">검색</button></form></div>`;
+      <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off"><button class="g-btn">검색</button></form>${chipsHTML()}</div>`;
   } else {
     $('#main').innerHTML = `<div class="g-top">
-      <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off" value="${esc(S.lastQuery)}"><button class="g-btn">검색</button></form>${savedBtn()}</div>
+      <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off" value="${esc(S.lastQuery)}"><button class="g-btn">검색</button></form>${savedBtn()}${chipsHTML()}</div>
       <p class="muted g-guide" id="result-note" hidden></p>
       <div class="g-grid" id="results"></div>
       <div class="row" style="justify-content:center;margin-top:20px"><button class="btn" id="more" hidden>결과 더 보기</button></div>`;
     $('#more').onclick = () => { S.resultLimit += 30; drawResults(); };
     drawResults();
   }
+  const chipNames = chipList(); $$('[data-chip]').forEach(b => b.onclick = () => toggleChip(chipNames[Number(b.dataset.chip)]));
   $('#to-hidden').onclick = () => { P.view = 'hidden'; savePick(); renderSearchUI(); window.scrollTo(0,0); };
   $('#to-saved').onclick = () => { P.view = 'saved'; P._sel = null; savePick(); renderSearchUI(); window.scrollTo(0,0); };
-  $('#gform').onsubmit = e => { e.preventDefault(); const q = $('#q').value.trim(); if (!q) return; if (!P.final){ (P.queries = P.queries || []).push({q, at: new Date().toISOString()}); if (!P.startedAt) P.startedAt = new Date().toISOString(); savePick(); } S.lastQuery = q; S.resultLimit = 30; S.resultInfo = runSearch(q, 'pilot'); S.results = S.resultInfo.list; renderSearchUI(); window.scrollTo(0,0); };
+  $('#gform').onsubmit = e => { e.preventDefault(); const q = $('#q').value.trim(); if (!q) return; if (S.active.length > 1 && q === S.lastQuery) return; /* 칩으로 만든 조건을 그대로 다시 눌렀을 때 */ if (!P.final){ (P.queries = P.queries || []).push({q, at: new Date().toISOString()}); if (!P.startedAt) P.startedAt = new Date().toISOString(); savePick(); } S.active = [q]; applyActive(); renderSearchUI(); window.scrollTo(0,0); };
   if (!S.lastQuery) $('#q').focus();
 }
 function drawResults(){
@@ -769,10 +808,11 @@ function drawResults(){
   const shown = S.results.slice(0, S.resultLimit);
   const info = S.resultInfo || {hits: shown.length, full: shown.length, missing: [], pos: []};
   const note = $('#result-note');
-  const noteText = !info.pos.length || !shown.length ? '' : !info.hits ? `‘${S.lastQuery}’에 맞는 사진이 없어 다른 사진을 보여 드려요.`
+  const noteText = info.strict ? (shown.length ? `맞는 사진 ${info.hits}장` : info.blocked.length ? `${info.blocked.map(x => `‘${x}’`).join(', ')}에 맞는 사진이 없어요. 이 칩을 꺼 보세요.` : '이 조합에 맞는 사진이 없어요. 칩을 하나 꺼 보세요.')
+    : !info.pos.length || !shown.length ? '' : !info.hits ? `‘${S.lastQuery}’에 맞는 사진이 없어 다른 사진을 보여 드려요.`
     : info.missing.length ? `‘${info.missing.join(' ')}’에 맞는 사진은 없어 나머지 검색어로 찾았어요.` : '';
   note.textContent = noteText; note.hidden = !noteText;
-  if (!shown.length){ box.innerHTML = '<p class="muted" style="padding:40px 0">더 보여 드릴 사진이 없어요.</p>'; $('#more').hidden = true; return; }
+  if (!shown.length){ box.innerHTML = info.strict ? '' : '<p class="muted" style="padding:40px 0">더 보여 드릴 사진이 없어요.</p>'; $('#more').hidden = true; return; }
   // 모든 단어가 맞는 사진 → 일부만 맞는 사진 → 채워 넣은 사진 순서이고, 넘어가는 자리에 제목을 단다
   const heading = i => {
     if (!i || !info.hits) return '';
@@ -891,7 +931,7 @@ function openPreview(id, list, fromSaved){
 }
 
 /* 연구자 화면: 최근 참여자 결과 */
-function resetSession(){ if (!P.archivedId && (P.liked.length || P.hidden.length)) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.hidden = []; P.hideLog = []; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; }
+function resetSession(){ if (!P.archivedId && (P.liked.length || P.hidden.length)) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.hidden = []; P.hideLog = []; P.filterLog = []; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; S.active = []; }
 
 
 function askParticipantId(){
@@ -929,7 +969,7 @@ function archiveCurrent(status){
     startedAt: P.startedAt, finishedAt: P.finishedAt || new Date().toISOString(),
     liked: P.liked.map(likedRef), final: P.final ? refOf(P.final) : null, queries: (P.queries || []).slice(),
     likeLog: (P.likeLog || []).map(e => Object.assign({}, e, {name: refOf(e.id).name})),
-    hidden: P.hidden.map(hiddenRef), hideLog: P.hideLog.map(e => Object.assign({}, e, {name: refOf(e.id).name}))};
+    hidden: P.hidden.map(hiddenRef), hideLog: P.hideLog.map(e => Object.assign({}, e, {name: refOf(e.id).name})), filterLog: P.filterLog.slice()};
   ARCH.push(rec); saveArch(); P.archivedId = rec.id;
 }
 const fmtTime = iso => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('ko-KR', {month:'numeric', day:'numeric'}) + ' ' + d.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'}); };
@@ -959,6 +999,7 @@ function renderArchive(){
       </div>
       <dl class="kv"><dt>진행자</dt><dd>${esc(r.researcher || '—')}</dd><dt>${r.status === '완료' ? '결정 시각' : '기록 시각'}</dt><dd class="mono">${fmtTime(r.finishedAt)} (첫 검색부터 ${durMin(r)})</dd>
         <dt>검색어 (${(r.queries || []).length}회)</dt><dd>${(r.queries || []).length ? `<ol class="q-list">${r.queries.map(x => `<li><span class="mono small muted">${new Date(x.at).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span> ${esc(x.q)}</li>`).join('')}</ol>` : '—'}</dd>
+        <dt>칩 사용</dt><dd class="mono">${(r.filterLog || []).length}회</dd>
         <dt>마음에 든 사진</dt><dd class="mono">${r.liked.length}장</dd>
         <dt>제외한 사진</dt><dd class="mono" style="word-break:break-all">${(r.hidden || []).length}장${(r.hidden || []).length ? ' · ' + r.hidden.map(x => esc(x.name)).join(', ') : ''}</dd>
         <dt>최종 사진</dt><dd class="mono" style="word-break:break-all">${r.final ? esc(r.final.name) : '—'}</dd></dl>
@@ -977,8 +1018,8 @@ function renderArchive(){
 }
 function archiveCSV(recs = ARCH){
   const cell = v => { const x = String(v ?? ''); return /[",\n]/.test(x) ? `"${x.replace(/"/g,'""')}"` : x; };
-  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order','hidden_count','hidden_with_query','restored_count'];
-  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '', (r.hidden || []).length, (r.hidden || []).map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.hideLog || []).filter(e => e.action === '되돌리기').length]);
+  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order','hidden_count','hidden_with_query','restored_count','filter_count'];
+  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '', (r.hidden || []).length, (r.hidden || []).map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.hideLog || []).filter(e => e.action === '되돌리기').length, (r.filterLog || []).length]);
   return [head.join(','), ...rows.map(r => r.map(cell).join(','))].join('\n');
 }
 async function exportArchiveZip(){
@@ -1057,7 +1098,7 @@ window.addEventListener('storage', e => {
   if (e.key === PICK_KEY){
     reloadPick();
     if (RESEARCH_PAGE) rerenderResearcher(); // 진행 중 표시 갱신
-    else if (SEARCH_PAGE && !P.pid){ S.nextUp = false; S.lastQuery = ''; render(); } // 연구자 창에서 "미완료로 끝내기"
+    else if (SEARCH_PAGE && !P.pid){ S.nextUp = false; S.lastQuery = ''; S.active = []; render(); } // 연구자 창에서 "미완료로 끝내기"
   }
   if (e.key === 'rs_pool_ping' && !S.syncing){
     clearTimeout(poolTimer);
