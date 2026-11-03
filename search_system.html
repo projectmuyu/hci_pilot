@@ -150,6 +150,17 @@ a.btn{text-decoration:none;display:inline-block}
 .g-check{position:absolute;top:8px;left:8px;width:38px;height:38px;border-radius:50%;border:2px solid #8a948f;display:grid;place-items:center;cursor:pointer;background:rgba(255,255,255,.88);color:transparent;font-size:18px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.18);transition:transform .12s}
 .g-check:hover{transform:scale(1.08);border-color:var(--accent)}
 .g-check.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.g-hide{position:absolute;top:8px;left:8px;width:38px;height:38px;border-radius:50%;border:0;display:grid;place-items:center;cursor:pointer;background:rgba(255,255,255,.88);color:#3a4440;font-size:16px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,.18);opacity:0;transition:transform .12s}
+.g-item:hover .g-hide,.g-hide:focus-visible{opacity:1}
+.g-hide:hover{transform:scale(1.08)}
+@media (hover:none){.g-hide{opacity:1}}
+.g-like.on~.g-hide,.g-item.off .g-hide,.g-item.off .g-like{display:none}
+.g-restore{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border:1px solid var(--line);background:var(--surface);color:var(--ink,#1c2421);border-radius:999px;padding:7px 14px;cursor:pointer;font-weight:600;white-space:nowrap}
+.g-item.off .g-restore{display:block}
+.g-item.off img{opacity:.3;filter:grayscale(.6)}
+.g-excl{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 16px;cursor:pointer;font-weight:600;color:var(--muted);white-space:nowrap}
+.g-excl[hidden]{display:none}
+.g-excl b{font-family:var(--f-mono);min-width:1.4em;text-align:center}
 .g-pick .g-item{outline:3px solid transparent;outline-offset:-3px}
 .g-pick .g-item.sel{outline-color:var(--accent)}
 .g-saved{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:9px 16px;cursor:pointer;font-weight:600;color:var(--muted);white-space:nowrap}
@@ -178,7 +189,7 @@ a.btn{text-decoration:none;display:inline-block}
 .g-strip img{width:160px;aspect-ratio:3/2;object-fit:cover;border-radius:6px;border:3px solid transparent}
 .g-strip figure.fin img{border-color:var(--accent)}
 .g-strip figcaption{font-size:11px;color:var(--muted);word-break:break-all}
-@media (prefers-reduced-motion:reduce){.g-like,.g-check{transition:none}}
+@media (prefers-reduced-motion:reduce){.g-like,.g-check,.g-hide{transition:none}}
 
 .arch h3{font-size:18px}
 .arch-label{width:min(240px,100%)!important;padding:6px 10px!important;font-size:17px;font-weight:700}
@@ -369,7 +380,7 @@ function runSearch(q, seed){
     const part = t => t.length >= 2 && idx.some(g => g.length >= 2 && t.includes(g));
     return t => t.length < 2 ? (idx.includes(t) ? 1 : 0) : idx.some(g => g.includes(t)) ? 1 : part(t) ? .5 : 0;
   };
-  const scored = usable().map(p => {
+  const scored = usable().filter(p => !P.hidden.includes(p.id)).map(p => {
     const match = matcher(p);
     if (neg.some(match)) return null;
     return {p, each: pos.map(forms => Math.max(...forms.map(match))), tie: hash(seed + q + p.id)};
@@ -674,20 +685,38 @@ async function syncDefaultPool(force){
 const photoById = id => S.photos.find(p => p.id === id);
 // 참여자 진행 상태: 마음에 든 사진, 최종 사진, 지금 보는 화면 (새로고침해도 유지)
 const PICK_KEY = 'rs_pick';
-const pickDefault = () => ({liked: [], final: null, view: 'search', startedAt: null, finishedAt: null});
+const pickDefault = () => ({liked: [], hidden: [], hideLog: [], final: null, view: 'search', startedAt: null, finishedAt: null});
 const P = Object.assign(pickDefault(), LS.get(PICK_KEY, {}));
 const savePick = () => LS.set(PICK_KEY, P);
 const reloadPick = () => { Object.keys(P).forEach(k => delete P[k]); Object.assign(P, pickDefault(), LS.get(PICK_KEY, {})); };
 const isLiked = id => P.liked.includes(id);
+const isHidden = id => P.hidden.includes(id);
 function toggleLike(id){
-  if (P.final) return;
+  if (P.final || isHidden(id)) return;
   const i = P.liked.indexOf(id);
   const qs = P.queries || [], qn = qs.length;
   const where = document.querySelector('.modal') ? '크게 보기' : P.view === 'saved' ? '모아 보기' : '검색 결과';
   (P.likeLog = P.likeLog || []).push({action: i >= 0 ? '빼기' : '담기', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where});
   if (i >= 0) P.liked.splice(i, 1); else P.liked.push(id);
   if (!P.startedAt) P.startedAt = new Date().toISOString();
-  savePick(); syncLikes();
+  savePick(); syncLikes(); syncHides();
+}
+// 제외: 지금 결과에는 흐리게 남고 다음 검색부터 나오지 않는다. 담은 사진은 제외하지 않는다
+function toggleHide(id){
+  if (P.final || (isLiked(id) && !isHidden(id))) return;
+  const i = P.hidden.indexOf(id), qs = P.queries || [], qn = qs.length;
+  const where = document.querySelector('.modal') ? '크게 보기' : P.view === 'hidden' ? '제외 목록' : '검색 결과';
+  P.hideLog.push({action: i >= 0 ? '되돌리기' : '제외', id, at: new Date().toISOString(), qn, q: qn ? qs[qn - 1].q : '', where});
+  if (i >= 0) P.hidden.splice(i, 1); else P.hidden.push(id);
+  if (!P.startedAt) P.startedAt = new Date().toISOString();
+  savePick(); syncHides();
+}
+function syncHides(){
+  $$('.g-item[data-id]').forEach(t => { if (t.querySelector('[data-hide]')) t.classList.toggle('off', isHidden(t.dataset.id)); });
+  $$('#hide-this').forEach(b => { const id = b.dataset.hideBtn, off = isHidden(id); b.textContent = off ? '되돌리기' : '이 사진 안 보기'; b.style.display = isLiked(id) ? 'none' : ''; });
+  $$('.modal [data-like]').forEach(b => { b.disabled = isHidden(b.dataset.like); });
+  $$('#to-hidden').forEach(b => { b.hidden = !P.hidden.length; });
+  $$('.g-excl-count').forEach(n => n.textContent = P.hidden.length);
 }
 const HEART = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.3-9.2C1.5 8.1 3.6 5 6.8 5c2 0 3.4 1.1 4.2 2.4h2C13.8 6.1 15.2 5 17.2 5c3.2 0 5.3 3.1 4.1 6.3-1.8 4.6-9.3 9.2-9.3 9.2z" fill="currentColor"/></svg>';
 function syncLikes(){
@@ -696,17 +725,19 @@ function syncLikes(){
   $$('.g-saved').forEach(n => n.classList.toggle('has', P.liked.length > 0));
   $$('[data-like-label]').forEach(n => n.textContent = isLiked(n.dataset.likeLabel) ? '마음에 든 사진에 담김' : '마음에 들어요');
 }
-const savedBtn = () => `<button class="g-saved ${P.liked.length ? 'has' : ''}" id="to-saved" type="button">${HEART}<span>마음에 든 사진</span><b class="g-saved-count">${P.liked.length}</b></button>`;
+const savedBtn = () => `<button class="g-excl" id="to-hidden" type="button" ${P.hidden.length ? '' : 'hidden'}><span>제외한 사진</span><b class="g-excl-count">${P.hidden.length}</b></button><button class="g-saved ${P.liked.length ? 'has' : ''}" id="to-saved" type="button">${HEART}<span>마음에 든 사진</span><b class="g-saved-count">${P.liked.length}</b></button>`;
 function tile(p, mode){
-  return `<div class="g-item${mode==='pick' && P._sel===p.id ? ' sel' : ''}" data-id="${p.id}">
+  return `<div class="g-item${mode==='pick' && P._sel===p.id ? ' sel' : ''}${mode==='search' && isHidden(p.id) ? ' off' : ''}" data-id="${p.id}">
     <button class="g-open" type="button" aria-label="크게 보기"><img loading="lazy" alt="방 사진" src="${urlFor(p,'thumb')}"></button>
     ${mode==='pick' ? `<button class="g-check${P._sel===p.id ? ' on' : ''}" type="button" data-pick="${p.id}" aria-pressed="${P._sel===p.id}" aria-label="이 사진 고르기">✓</button>` : ''}
     <button class="g-like${isLiked(p.id) ? ' on' : ''}" type="button" data-like="${p.id}" aria-pressed="${isLiked(p.id)}">${HEART}</button>
+    ${mode==='search' ? `<button class="g-hide" type="button" data-hide="${p.id}" aria-label="이 사진 안 보기" title="이 사진 안 보기">✕</button><button class="g-restore" type="button" data-hide="${p.id}">되돌리기</button>` : ''}
   </div>`;
 }
 function fitTiles(box){
   $$('.g-item', box).forEach(t => { const img = t.querySelector('img'); const fit = () => { if (img.naturalWidth) t.style.flexBasis = Math.round(190 * img.naturalWidth / img.naturalHeight) + 'px'; }; img.complete ? fit() : img.addEventListener('load', fit); });
 }
+function bindHideButtons(root){ $$('[data-hide]', root).forEach(b => b.onclick = e => { e.stopPropagation(); toggleHide(b.dataset.hide); if (P.view === 'hidden') renderSearchUI(); }); }
 function bindLikeButtons(root){ $$('[data-like]', root).forEach(b => b.onclick = e => { e.stopPropagation(); toggleLike(b.dataset.like); if (P.view === 'saved') renderSearchUI(); }); }
 
 function renderSearchUI(){
@@ -715,6 +746,7 @@ function renderSearchUI(){
   if (SEARCH_PAGE && (!P.pid || S.nextUp)) return renderStartUI();
   if (P.final) return renderDoneUI();
   if (P.view === 'saved') return renderSavedUI();
+  if (P.view === 'hidden') return renderHiddenUI();
   if (!S.lastQuery){
     $('#main').innerHTML = `<div class="g-bar g-bar-home">${savedBtn()}</div><div class="g-home">
       <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off"><button class="g-btn">검색</button></form></div>`;
@@ -727,6 +759,7 @@ function renderSearchUI(){
     $('#more').onclick = () => { S.resultLimit += 30; drawResults(); };
     drawResults();
   }
+  $('#to-hidden').onclick = () => { P.view = 'hidden'; savePick(); renderSearchUI(); window.scrollTo(0,0); };
   $('#to-saved').onclick = () => { P.view = 'saved'; P._sel = null; savePick(); renderSearchUI(); window.scrollTo(0,0); };
   $('#gform').onsubmit = e => { e.preventDefault(); const q = $('#q').value.trim(); if (!q) return; if (!P.final){ (P.queries = P.queries || []).push({q, at: new Date().toISOString()}); if (!P.startedAt) P.startedAt = new Date().toISOString(); savePick(); } S.lastQuery = q; S.resultLimit = 30; S.resultInfo = runSearch(q, 'pilot'); S.results = S.resultInfo.list; renderSearchUI(); window.scrollTo(0,0); };
   if (!S.lastQuery) $('#q').focus();
@@ -736,10 +769,10 @@ function drawResults(){
   const shown = S.results.slice(0, S.resultLimit);
   const info = S.resultInfo || {hits: shown.length, full: shown.length, missing: [], pos: []};
   const note = $('#result-note');
-  const noteText = !info.pos.length ? '' : !info.hits ? `‘${S.lastQuery}’에 맞는 사진이 없어 다른 사진을 보여 드려요.`
+  const noteText = !info.pos.length || !shown.length ? '' : !info.hits ? `‘${S.lastQuery}’에 맞는 사진이 없어 다른 사진을 보여 드려요.`
     : info.missing.length ? `‘${info.missing.join(' ')}’에 맞는 사진은 없어 나머지 검색어로 찾았어요.` : '';
   note.textContent = noteText; note.hidden = !noteText;
-  if (!shown.length){ box.innerHTML = '<p class="muted" style="padding:40px 0">검색 결과가 없습니다.</p>'; $('#more').hidden = true; return; }
+  if (!shown.length){ box.innerHTML = '<p class="muted" style="padding:40px 0">더 보여 드릴 사진이 없어요.</p>'; $('#more').hidden = true; return; }
   // 모든 단어가 맞는 사진 → 일부만 맞는 사진 → 채워 넣은 사진 순서이고, 넘어가는 자리에 제목을 단다
   const heading = i => {
     if (!i || !info.hits) return '';
@@ -747,11 +780,24 @@ function drawResults(){
     return title ? `<span class="g-fill"></span><h2 class="g-sec">${title}</h2>` : '';
   };
   box.innerHTML = shown.map((p, i) => heading(i) + tile(p, 'search')).join('') + '<span class="g-fill"></span>';
-  fitTiles(box); bindLikeButtons(box);
+  fitTiles(box); bindLikeButtons(box); bindHideButtons(box);
   $$('.g-item', box).forEach(t => t.querySelector('.g-open').onclick = () => openPreview(t.dataset.id, shown));
   $('#more').hidden = S.results.length <= S.resultLimit;
 }
 
+function renderHiddenUI(){
+  const list = P.hidden.map(photoById).filter(Boolean);
+  $('#main').innerHTML = `<div class="g-top">
+      <button class="btn" id="back" type="button">← 검색으로 돌아가기</button>
+      <h1 class="g-title">제외한 사진 <span class="mono">${list.length}</span></h1></div>
+    ${list.length ? `<p class="muted g-guide">되돌리면 다음 검색부터 다시 나와요.</p>
+      <div class="g-grid" id="hidden-grid">${list.map(p => tile(p, 'search')).join('')}<span class="g-fill"></span></div>`
+    : '<div class="empty">제외한 사진이 없어요.</div>'}`;
+  $('#back').onclick = () => { P.view = 'search'; savePick(); renderSearchUI(); window.scrollTo(0,0); };
+  const box = $('#hidden-grid'); if (!box) return;
+  fitTiles(box); bindHideButtons(box);
+  $$('.g-item', box).forEach(t => t.querySelector('.g-open').onclick = () => openPreview(t.dataset.id, list));
+}
 const pickHint = () => P._sel ? '고른 사진: 1장' : '왼쪽 위 동그라미를 눌러 한 장을 고르세요';
 // 고른 사진 표시를 사진 위 버튼, 크게 보기 팝업, 아래 결정 줄에 함께 맞춘다
 function syncPick(){
@@ -824,12 +870,13 @@ function openPreview(id, list, fromSaved){
   m.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="이미지 크게 보기">
     <img alt="방 사진" src="${urlFor(p,'full')}">
     <div class="row between"><div class="row"><button class="btn sm" data-nav="-1" ${i <= 0 ? 'disabled' : ''}>← 이전</button><button class="btn sm" data-nav="1" ${i >= list.length - 1 ? 'disabled' : ''}>다음 →</button></div>
-    <div class="row"><button class="btn" data-close type="button">닫기</button><button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>${fromSaved ? `<button class="g-like-btn" id="pick-this" type="button" data-pick="${id}"></button>` : ''}</div></div></div>`;
+    <div class="row"><button class="btn" data-close type="button">닫기</button><button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>${fromSaved ? `<button class="g-like-btn" id="pick-this" type="button" data-pick="${id}"></button>` : `<button class="btn" id="hide-this" type="button" data-hide-btn="${id}"></button>`}</div></div></div>`;
   const drop = () => { m.remove(); document.removeEventListener('keydown', onKey); };
   // 모아 보기에서 연 팝업: 하트를 끄고 켠 결과는 팝업을 닫을 때 목록에 반영한다 (닫기 전에는 되돌릴 수 있게)
   const close = () => {
     drop();
-    if (fromSaved && Array.from($$('#saved .g-item')).map(t => t.dataset.id).join() !== P.liked.join()){ const y = window.scrollY; renderSearchUI(); window.scrollTo(0, y); }
+    const grid = P.view === 'saved' ? ['#saved .g-item', P.liked] : P.view === 'hidden' ? ['#hidden-grid .g-item', P.hidden] : null;
+    if (grid && Array.from($$(grid[0])).map(t => t.dataset.id).join() !== grid[1].join()){ const y = window.scrollY; renderSearchUI(); window.scrollTo(0, y); }
   };
   const go = d => { const n = list[i + d]; if (n){ drop(); openPreview(n.id, list, fromSaved); } };
   const onKey = e => { if (e.key === 'Escape') close(); if (e.key === 'ArrowRight') go(1); if (e.key === 'ArrowLeft') go(-1); };
@@ -837,22 +884,23 @@ function openPreview(id, list, fromSaved){
   $$('[data-nav]', m).forEach(b => b.onclick = () => go(Number(b.dataset.nav)));
   $$('[data-like]', m).forEach(b => b.onclick = () => { toggleLike(id); if (fromSaved){ if (P._sel === id && !isLiked(id)){ P._sel = null; savePick(); } syncPick(); } });
   const pk = $('#pick-this', m); if (pk) pk.onclick = () => togglePick(id);
+  const hd = $('#hide-this', m); if (hd) hd.onclick = () => toggleHide(id);
   document.addEventListener('keydown', onKey);
   document.body.appendChild(m);
-  if (fromSaved) syncPick();
+  if (fromSaved) syncPick(); else syncHides();
 }
 
 /* 연구자 화면: 최근 참여자 결과 */
-function resetSession(){ if (!P.archivedId && P.liked.length) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; }
+function resetSession(){ if (!P.archivedId && (P.liked.length || P.hidden.length)) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.hidden = []; P.hideLog = []; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; }
 
 
 function askParticipantId(){
   const m = document.createElement('div'); m.className = 'modal';
-  const warn = P.pid && !P.final && P.liked.length;
+  const warn = P.pid && !P.final && (P.liked.length || P.hidden.length);
   m.innerHTML = `<form class="panel g-confirm" id="pid-form" role="dialog" aria-modal="true" aria-label="참여자 ID 입력">
     <h2>참여자 ID</h2>
     <input type="text" id="pid-in" placeholder="예: P03" autocomplete="off" required>
-    ${warn ? `<p class="small" style="color:var(--research)">${esc(P.pid)}의 진행 중 결과(담은 사진 ${P.liked.length}장)는 "미완료"로 기록됩니다.</p>` : ''}
+    ${warn ? `<p class="small" style="color:var(--research)">${esc(P.pid)}의 진행 중 결과(담은 사진 ${P.liked.length}장, 제외한 사진 ${P.hidden.length}장)는 "미완료"로 기록됩니다.</p>` : ''}
     <div class="row" style="justify-content:flex-end"><button class="btn" data-close type="button">취소</button><button class="g-btn" type="submit">검색 화면으로</button></div></form>`;
   m.onclick = e => { if (e.target === m || e.target.dataset.close != null) m.remove(); };
   document.body.appendChild(m);
@@ -871,6 +919,7 @@ const reloadArch = () => { ARCH = LS.get(ARCH_KEY, []); }; // 고치기 전에 �
 const WHO_KEY = 'rs_researcher'; // 이 PC의 진행자 이름. 기록마다 붙어 나중에 세 사람 기록을 합칠 때 구분한다
 const fileTag = () => { const w = LS.get(WHO_KEY, '').replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 20); return (w ? w + '_' : '') + new Date().toISOString().slice(0,10); };
 const refOf = id => { const p = photoById(id); return {id, name: p ? p.name : id}; };
+const hiddenRef = id => { const add = P.hideLog.filter(e => e.id === id && e.action === '제외').pop(); return Object.assign(refOf(id), add ? {qn: add.qn, q: add.q, hiddenAt: add.at} : {}); };
 const likedRef = id => { const add = (P.likeLog || []).filter(e => e.id === id && e.action === '담기').pop(); return Object.assign(refOf(id), add ? {qn: add.qn, q: add.q, likedAt: add.at} : {}); };
 function archiveCurrent(status){
   reloadArch();
@@ -879,7 +928,8 @@ function archiveCurrent(status){
   const rec = {id: 'a' + Date.now().toString(36), no, label: P.pid || '', researcher: who, note: '', status,
     startedAt: P.startedAt, finishedAt: P.finishedAt || new Date().toISOString(),
     liked: P.liked.map(likedRef), final: P.final ? refOf(P.final) : null, queries: (P.queries || []).slice(),
-    likeLog: (P.likeLog || []).map(e => Object.assign({}, e, {name: refOf(e.id).name}))};
+    likeLog: (P.likeLog || []).map(e => Object.assign({}, e, {name: refOf(e.id).name})),
+    hidden: P.hidden.map(hiddenRef), hideLog: P.hideLog.map(e => Object.assign({}, e, {name: refOf(e.id).name}))};
   ARCH.push(rec); saveArch(); P.archivedId = rec.id;
 }
 const fmtTime = iso => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('ko-KR', {month:'numeric', day:'numeric'}) + ' ' + d.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'}); };
@@ -910,6 +960,7 @@ function renderArchive(){
       <dl class="kv"><dt>진행자</dt><dd>${esc(r.researcher || '—')}</dd><dt>${r.status === '완료' ? '결정 시각' : '기록 시각'}</dt><dd class="mono">${fmtTime(r.finishedAt)} (첫 검색부터 ${durMin(r)})</dd>
         <dt>검색어 (${(r.queries || []).length}회)</dt><dd>${(r.queries || []).length ? `<ol class="q-list">${r.queries.map(x => `<li><span class="mono small muted">${new Date(x.at).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span> ${esc(x.q)}</li>`).join('')}</ol>` : '—'}</dd>
         <dt>마음에 든 사진</dt><dd class="mono">${r.liked.length}장</dd>
+        <dt>제외한 사진</dt><dd class="mono" style="word-break:break-all">${(r.hidden || []).length}장${(r.hidden || []).length ? ' · ' + r.hidden.map(x => esc(x.name)).join(', ') : ''}</dd>
         <dt>최종 사진</dt><dd class="mono" style="word-break:break-all">${r.final ? esc(r.final.name) : '—'}</dd></dl>
       <div class="g-strip">${r.liked.map(ref => thumbHTML(ref, r.final && ref.id === r.final.id)).join('') || '<p class="small muted">담은 사진 없음</p>'}</div>
     </div>`).join('') : '<div class="empty card">아직 기록이 없습니다. 참여자가 최종 사진을 고르면 여기에 쌓입니다.</div>'}
@@ -926,8 +977,8 @@ function renderArchive(){
 }
 function archiveCSV(recs = ARCH){
   const cell = v => { const x = String(v ?? ''); return /[",\n]/.test(x) ? `"${x.replace(/"/g,'""')}"` : x; };
-  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order'];
-  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '']);
+  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order','hidden_count','hidden_with_query','restored_count'];
+  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '', (r.hidden || []).length, (r.hidden || []).map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.hideLog || []).filter(e => e.action === '되돌리기').length]);
   return [head.join(','), ...rows.map(r => r.map(cell).join(','))].join('\n');
 }
 async function exportArchiveZip(){
