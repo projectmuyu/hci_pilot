@@ -387,7 +387,8 @@ function runSearch(q, seed, chips){
     const part = t => t.length >= 2 && idx.some(g => g.length >= 2 && t.includes(g));
     return t => t.length < 2 ? (idx.includes(t) ? 1 : 0) : idx.some(g => g.includes(t)) ? 1 : part(t) ? .5 : 0;
   };
-  const scored = usable().filter(p => !P.hidden.includes(p.id)).map(p => {
+  const skip = ALT2 ? alt2Seen() : P.hidden;
+  const scored = usable().filter(p => !skip.includes(p.id)).map(p => {
     const match = matcher(p);
     if (neg.some(match)) return null;
     return {p, each: pos.map(forms => Math.max(...forms.map(match))), tie: hash(seed + q + p.id)};
@@ -417,6 +418,9 @@ function runSearch(q, seed, chips){
 // 같은 브라우저라 두 창이 localStorage·IndexedDB를 함께 쓰고, storage 이벤트로 서로의 변경을 받는다
 const VIEW = new URLSearchParams(location.search).get('view');
 const SEARCH_PAGE = VIEW === 'search', RESEARCH_PAGE = VIEW === 'researcher';
+// ALT2 (?view=search&alt=2): 검색 한 번에 사진 ALT2_N장, 그중 한 장을 골라 ALT2_MIN~ALT2_MAX번 반복한 뒤 고른 사진 중 최종 1장을 고른다
+const ALT2 = SEARCH_PAGE && new URLSearchParams(location.search).get('alt') === '2';
+const ALT2_N = 4, ALT2_MIN = 4, ALT2_MAX = 5;
 function render(){
   if (SEARCH_PAGE) S.mode = 'search';
   if (RESEARCH_PAGE) S.mode = null; // 연구자 창은 진행 상태를 쓰지 않는다 (검색 창의 최신 상태를 덮어쓰지 않게)
@@ -426,7 +430,7 @@ function render(){
   $('#brand').textContent = '방 사진 검색 · 연구자';
   const inProgress = !!P.pid && !P.final;
   $('#topright').innerHTML = RESEARCH_PAGE
-    ? `<div class="row">${inProgress ? `<span class="small muted">검색 화면 진행 중 <b>${esc(P.pid)}</b> · 담은 사진 ${P.liked.length}장</span><button class="btn sm danger" id="abort" type="button">미완료로 끝내기</button>` : ''}<a class="btn primary sm" href="?view=search" target="_blank" rel="noopener">검색 화면 열기 ↗</a></div>`
+    ? `<div class="row">${inProgress ? `<span class="small muted">검색 화면 진행 중 <b>${esc(P.pid)}</b>${P.alt === 2 ? ' · ALT2' : ''} · 담은 사진 ${P.liked.length}장</span><button class="btn sm danger" id="abort" type="button">미완료로 끝내기</button>` : ''}<a class="btn primary sm" href="?view=search" target="_blank" rel="noopener">검색 화면 열기 ↗</a><a class="btn sm" href="?view=search&alt=2" target="_blank" rel="noopener">ALT2 열기 ↗</a></div>`
     : `<div class="row">${inProgress ? `<button class="btn sm" id="resume" type="button">${esc(P.pid)} 이어서 진행</button>` : ''}<button class="btn primary sm" id="open-search" type="button">새 참여자 시작</button></div>`;
   const os = $('#open-search'); if (os) os.onclick = askParticipantId;
   const rs = $('#resume'); if (rs) rs.onclick = () => { S.mode = 'search'; render(); };
@@ -703,7 +707,7 @@ async function syncDefaultPool(force){
 const photoById = id => S.photos.find(p => p.id === id);
 // 참여자 진행 상태: 마음에 든 사진, 최종 사진, 지금 보는 화면 (새로고침해도 유지)
 const PICK_KEY = 'rs_pick';
-const pickDefault = () => ({liked: [], hidden: [], hideLog: [], filterLog: [], final: null, view: 'search', startedAt: null, finishedAt: null});
+const pickDefault = () => ({liked: [], hidden: [], hideLog: [], filterLog: [], rounds: [], final: null, view: 'search', startedAt: null, finishedAt: null});
 const P = Object.assign(pickDefault(), LS.get(PICK_KEY, {}));
 const savePick = () => LS.set(PICK_KEY, P);
 S.active = []; // 지금 켜진 칩(검색한 말). 새로고침하면 처음 화면으로 돌아가므로 저장하지 않는다
@@ -749,7 +753,7 @@ function tile(p, mode){
   return `<div class="g-item${mode==='pick' && P._sel===p.id ? ' sel' : ''}${mode==='search' && isHidden(p.id) ? ' off' : ''}" data-id="${p.id}">
     <button class="g-open" type="button" aria-label="크게 보기"><img loading="lazy" alt="방 사진" src="${urlFor(p,'thumb')}"></button>
     ${mode==='pick' ? `<button class="g-check${P._sel===p.id ? ' on' : ''}" type="button" data-pick="${p.id}" aria-pressed="${P._sel===p.id}" aria-label="이 사진 고르기">✓</button>` : ''}
-    <button class="g-like${isLiked(p.id) ? ' on' : ''}" type="button" data-like="${p.id}" aria-pressed="${isLiked(p.id)}">${HEART}</button>
+    ${ALT2 ? '' : `<button class="g-like${isLiked(p.id) ? ' on' : ''}" type="button" data-like="${p.id}" aria-pressed="${isLiked(p.id)}">${HEART}</button>`}
     ${mode==='search' ? `<button class="g-hide" type="button" data-hide="${p.id}" aria-label="이 사진 안 보기" title="이 사진 안 보기">✕</button><button class="g-restore" type="button" data-hide="${p.id}">되돌리기</button>` : ''}
   </div>`;
 }
@@ -783,11 +787,79 @@ function toggleChip(q){
   renderSearchUI(); window.scrollTo(0,0);
   const again = $('#chips'); if (again) again.scrollLeft = x;
 }
+function alt2Seen(){ return (P.rounds || []).flatMap(r => r.shown); }
+function renderAlt2(){
+  const cur = P.rounds[P.rounds.length - 1];
+  if (P.stage2 === 'final') return renderAlt2Final();
+  if (cur && !cur.picked) return renderAlt2Round(cur);
+  renderAlt2Search();
+}
+function renderAlt2Search(){
+  const n = P.liked.length, last = (P.queries || []).slice(-1)[0];
+  const guide = !P.rounds.length ? '검색하면서 방 사진을 찾아 주세요. 원하는 대로 검색하고 검색어를 고치셔도 됩니다. 사진을 최소 4장 골라 주세요.'
+    : n >= ALT2_MIN ? '한 번 더 검색하거나, 고른 사진 중에서 최종 사진을 골라 주세요.' : '다음 사진을 찾아 주세요. 검색어를 고쳐도, 새로 써도 됩니다.';
+  $('#main').innerHTML = `<div class="g-home">
+    <p class="muted" style="text-align:center;max-width:640px">${guide}</p>
+    ${n ? `<p class="small muted"><span class="mono">${n}</span>장 골랐어요</p>` : ''}
+    <form class="g-form" id="gform" role="search"><input type="search" id="q" aria-label="검색어" autocomplete="off" value="${esc(last ? last.q : '')}"><button class="g-btn">검색</button></form>
+    ${S.alt2Note ? `<p class="muted" id="result-note">${esc(S.alt2Note)}</p>` : ''}
+    ${n >= ALT2_MIN ? '<button class="btn" id="alt-final" type="button">최종 사진 고르기</button>' : ''}</div>`;
+  $('#gform').onsubmit = e => {
+    e.preventDefault();
+    const q = $('#q').value.trim(); if (!q) return;
+    const r = runSearch(q, 'pilot'), at = new Date().toISOString();
+    (P.queries = P.queries || []).push({q, at, hits: r.hits});
+    if (!P.startedAt) P.startedAt = at;
+    const shown = r.pos.length && !r.hits ? [] : r.list.slice(0, ALT2_N);
+    S.alt2Note = shown.length ? '' : `‘${q}’에 맞는 사진이 없어요. 다른 말로 검색해 주세요.`; // 사진을 보지 않았으니 횟수에 넣지 않는다
+    if (shown.length){ P.rounds.push({q, at, hits: r.hits, shown: shown.map(p => p.id)}); P._sel = null; }
+    savePick(); renderSearchUI(); window.scrollTo(0,0);
+  };
+  const fin = $('#alt-final'); if (fin) fin.onclick = () => { P.stage2 = 'final'; P._sel = null; S.alt2Note = ''; savePick(); renderSearchUI(); window.scrollTo(0,0); };
+  const inp = $('#q'); inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+}
+function alt2Grid(list, heading){
+  return `<div class="g-grid g-pick" id="saved">${list.map((p, i) => (heading === i ? '<span class="g-fill"></span><h2 class="g-sec">다른 사진</h2>' : '') + tile(p, 'pick')).join('')}<span class="g-fill"></span></div>`;
+}
+function bindAlt2Grid(list){
+  const box = $('#saved');
+  fitTiles(box);
+  $$('.g-item', box).forEach(t => t.querySelector('.g-open').onclick = () => openPreview(t.dataset.id, list, true));
+  $$('[data-pick]', box).forEach(b => b.onclick = () => togglePick(b.dataset.pick));
+}
+function renderAlt2Round(cur){
+  const list = cur.shown.map(photoById).filter(Boolean);
+  $('#main').innerHTML = `<div class="g-top"><h1 class="g-title">‘${esc(cur.q)}’ 검색 결과</h1></div>
+    <p class="muted g-guide">이 중에서 가장 마음에 드는 사진 한 장을 골라 주세요. 사진을 누르면 크게 볼 수 있어요.</p>
+    ${alt2Grid(list, cur.hits > 0 && cur.hits < list.length ? cur.hits : -1)}
+    <div class="g-decide"><span class="muted" id="sel-hint">${pickHint()}</span><button class="g-btn" id="decide" type="button" ${P._sel ? '' : 'disabled'}>이 사진 고르기</button></div>`;
+  bindAlt2Grid(list);
+  $('#decide').onclick = () => {
+    if (!P._sel) return;
+    const at = new Date().toISOString();
+    cur.picked = P._sel; cur.pickedAt = at; P.liked.push(P._sel);
+    (P.likeLog = P.likeLog || []).push({action: '담기', id: P._sel, at, qn: P.queries.length, q: cur.q, where: '라운드', active: []});
+    P._sel = null;
+    if (P.liked.length >= ALT2_MAX) P.stage2 = 'final';
+    savePick(); renderSearchUI(); window.scrollTo(0,0);
+  };
+}
+function renderAlt2Final(){
+  const list = P.liked.map(photoById).filter(Boolean);
+  $('#main').innerHTML = `<div class="g-top"><h1 class="g-title">고른 사진 <span class="mono">${list.length}</span></h1></div>
+    <p class="muted g-guide">이 중에서 다음에 혼자 지낼 방으로 가장 마음에 드는 사진 한 장을 골라 주세요.</p>
+    ${alt2Grid(list, -1)}
+    <div class="g-decide"><span class="muted" id="sel-hint">${pickHint()}</span><button class="g-btn" id="decide" type="button" ${P._sel ? '' : 'disabled'}>이 사진으로 결정</button></div>`;
+  bindAlt2Grid(list);
+  $('#decide').onclick = confirmFinal;
+}
 function renderSearchUI(){
   document.body.classList.add('search-mode');
   $('#brand').textContent = ''; $('#topright').innerHTML = '';
-  if (SEARCH_PAGE && (!P.pid || S.nextUp)) return renderStartUI();
+  // 다른 방식(ALT1/ALT2)으로 진행 중인 참여자는 이어 가지 않고 시작 화면을 보여 준다
+  if (SEARCH_PAGE && (!P.pid || S.nextUp || (!P.final && (P.alt || 1) !== (ALT2 ? 2 : 1)))) return renderStartUI();
   if (P.final) return renderDoneUI();
+  if (ALT2) return renderAlt2();
   if (P.view === 'saved') return renderSavedUI();
   if (P.view === 'hidden') return renderHiddenUI();
   if (!S.lastQuery){
@@ -849,7 +921,7 @@ function syncPick(){
   $$('[data-pick]').forEach(b => {
     const id = b.dataset.pick, on = P._sel === id;
     b.classList.toggle('on', on); b.setAttribute('aria-pressed', on);
-    if (b.id === 'pick-this'){ b.disabled = !isLiked(id); b.textContent = on ? '✓ 고른 사진' : '이 사진 고르기'; }
+    if (b.id === 'pick-this'){ b.disabled = !ALT2 && !isLiked(id); b.textContent = on ? '✓ 고른 사진' : '이 사진 고르기'; }
   });
   $$('#saved .g-item').forEach(t => t.classList.toggle('sel', t.dataset.id === P._sel));
   const d = $('#decide'); if (d) d.disabled = !P._sel;
@@ -904,7 +976,7 @@ function renderStartUI(){
   $('#start-form').onsubmit = e => {
     e.preventDefault(); const id = inp.value.trim(); if (!id){ inp.focus(); return; }
     LS.set(WHO_KEY, $('#who-in').value.trim());
-    resetSession(); P.pid = id; savePick(); S.nextUp = false; renderSearchUI(); window.scrollTo(0,0);
+    resetSession(); P.pid = id; P.alt = ALT2 ? 2 : 1; savePick(); S.nextUp = false; renderSearchUI(); window.scrollTo(0,0);
   };
 }
 
@@ -915,7 +987,7 @@ function openPreview(id, list, fromSaved){
   m.innerHTML = `<div class="panel" role="dialog" aria-modal="true" aria-label="이미지 크게 보기">
     <img alt="방 사진" src="${urlFor(p,'full')}">
     <div class="row between"><div class="row"><button class="btn sm" data-nav="-1" ${i <= 0 ? 'disabled' : ''}>← 이전</button><button class="btn sm" data-nav="1" ${i >= list.length - 1 ? 'disabled' : ''}>다음 →</button></div>
-    <div class="row"><button class="btn" data-close type="button">닫기</button><button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>${fromSaved ? `<button class="g-like-btn" id="pick-this" type="button" data-pick="${id}"></button>` : `<button class="btn" id="hide-this" type="button" data-hide-btn="${id}"></button>`}</div></div></div>`;
+    <div class="row"><button class="btn" data-close type="button">닫기</button>${ALT2 ? '' : `<button class="g-like-btn${isLiked(id) ? ' on' : ''}" type="button" data-like="${id}" aria-pressed="${isLiked(id)}">${HEART}<span data-like-label="${id}">${isLiked(id) ? '마음에 든 사진에 담김' : '마음에 들어요'}</span></button>`}${fromSaved ? `<button class="g-like-btn" id="pick-this" type="button" data-pick="${id}"></button>` : `<button class="btn" id="hide-this" type="button" data-hide-btn="${id}"></button>`}</div></div></div>`;
   const drop = () => { m.remove(); document.removeEventListener('keydown', onKey); };
   // 모아 보기에서 연 팝업: 하트를 끄고 켠 결과는 팝업을 닫을 때 목록에 반영한다 (닫기 전에는 되돌릴 수 있게)
   const close = () => {
@@ -936,7 +1008,7 @@ function openPreview(id, list, fromSaved){
 }
 
 /* 연구자 화면: 최근 참여자 결과 */
-function resetSession(){ if (!P.archivedId && (P.liked.length || P.hidden.length)) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.hidden = []; P.hideLog = []; P.filterLog = []; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; S.active = []; }
+function resetSession(){ if (!P.archivedId && (P.liked.length || P.hidden.length || P.rounds.length)) archiveCurrent('미완료'); P.archivedId = null; P.pid = null; P.queries = []; P.likeLog = []; P.liked = []; P.hidden = []; P.hideLog = []; P.filterLog = []; P.rounds = []; P.stage2 = null; P.alt = 1; P.final = null; P._sel = null; P.view = 'search'; P.startedAt = null; P.finishedAt = null; savePick(); S.lastQuery = ''; S.results = []; S.resultInfo = null; S.active = []; S.alt2Note = ''; }
 
 
 function askParticipantId(){
@@ -974,7 +1046,8 @@ function archiveCurrent(status){
     startedAt: P.startedAt, finishedAt: P.finishedAt || new Date().toISOString(),
     liked: P.liked.map(likedRef), final: P.final ? refOf(P.final) : null, queries: (P.queries || []).slice(),
     likeLog: (P.likeLog || []).map(e => Object.assign({}, e, {name: refOf(e.id).name})),
-    hidden: P.hidden.map(hiddenRef), hideLog: P.hideLog.map(e => Object.assign({}, e, {name: refOf(e.id).name})), filterLog: P.filterLog.slice()};
+    hidden: P.hidden.map(hiddenRef), hideLog: P.hideLog.map(e => Object.assign({}, e, {name: refOf(e.id).name})), filterLog: P.filterLog.slice(), alt: P.alt || 1,
+    rounds: (P.rounds || []).map(r => ({q: r.q, at: r.at, hits: r.hits, shown: r.shown.map(id => refOf(id)), picked: r.picked ? refOf(r.picked) : null, pickedAt: r.pickedAt || null}))};
   ARCH.push(rec); saveArch(); P.archivedId = rec.id;
 }
 const fmtTime = iso => { if (!iso) return '—'; const d = new Date(iso); return d.toLocaleDateString('ko-KR', {month:'numeric', day:'numeric'}) + ' ' + d.toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit'}); };
@@ -999,12 +1072,12 @@ function renderArchive(){
         <button class="btn sm" id="arch-zip" ${list.length ? '' : 'disabled'}>기록 + 최종 사진 (ZIP)</button></div></div>
     ${list.length ? list.map(r => `<div class="card stack arch" data-arch="${r.id}">
       <div class="row between">
-        <div class="row"><span class="mono small muted">#${r.no}</span><input type="text" class="arch-label" data-f="label" value="${esc(r.label)}" placeholder="참여자 ID" aria-label="참여자 ID (#${r.no})"><span class="pill ${r.status === '완료' ? 'ok' : 'warn'}">${r.status}</span>${r.imported ? '<span class="pill">불러온 기록</span>' : ''}</div>
+        <div class="row"><span class="mono small muted">#${r.no}</span><input type="text" class="arch-label" data-f="label" value="${esc(r.label)}" placeholder="참여자 ID" aria-label="참여자 ID (#${r.no})"><span class="pill ${r.status === '완료' ? 'ok' : 'warn'}">${r.status}</span>${r.alt === 2 ? '<span class="pill">ALT2</span>' : ''}${r.imported ? '<span class="pill">불러온 기록</span>' : ''}</div>
         <div class="row">${r.final && photoById(r.final.id) ? `<a class="btn sm" href="${urlFor(photoById(r.final.id),'full')}" download="P${r.no}_FINAL_${esc(r.final.name.replace(/\.[^.]+$/, ''))}.jpg">최종 사진 저장</a>` : ''}<button class="btn sm danger" data-del="${r.id}" type="button">기록 삭제</button></div>
       </div>
       <dl class="kv"><dt>진행자</dt><dd>${esc(r.researcher || '—')}</dd><dt>${r.status === '완료' ? '결정 시각' : '기록 시각'}</dt><dd class="mono">${fmtTime(r.finishedAt)} (첫 검색부터 ${durMin(r)})</dd>
         <dt>검색어 (${(r.queries || []).length}회)</dt><dd>${(r.queries || []).length ? `<ol class="q-list">${r.queries.map(x => `<li><span class="mono small muted">${new Date(x.at).toLocaleTimeString('ko-KR', {hour:'2-digit', minute:'2-digit', second:'2-digit'})}</span> ${esc(x.q)}</li>`).join('')}</ol>` : '—'}</dd>
-        <dt>칩 사용</dt><dd class="mono">${(r.filterLog || []).length}회</dd>
+        ${r.alt === 2 ? `<dt>라운드 (${(r.rounds || []).length}번)</dt><dd><ol class="q-list">${(r.rounds || []).map(x => `<li>${esc(x.q)} <span class="mono small muted">맞는 사진 ${x.hits}장 · 고른 사진 ${x.picked ? esc(x.picked.name) : '—'}</span></li>`).join('')}</ol></dd>` : `<dt>칩 사용</dt><dd class="mono">${(r.filterLog || []).length}회</dd>`}
         <dt>마음에 든 사진</dt><dd class="mono">${r.liked.length}장</dd>
         <dt>제외한 사진</dt><dd class="mono" style="word-break:break-all">${(r.hidden || []).length}장${(r.hidden || []).length ? ' · ' + r.hidden.map(x => esc(x.name)).join(', ') : ''}</dd>
         <dt>최종 사진</dt><dd class="mono" style="word-break:break-all">${r.final ? esc(r.final.name) : '—'}</dd></dl>
@@ -1023,8 +1096,8 @@ function renderArchive(){
 }
 function archiveCSV(recs = ARCH){
   const cell = v => { const x = String(v ?? ''); return /[",\n]/.test(x) ? `"${x.replace(/"/g,'""')}"` : x; };
-  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order','hidden_count','hidden_with_query','restored_count','filter_count'];
-  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '', (r.hidden || []).length, (r.hidden || []).map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.hideLog || []).filter(e => e.action === '되돌리기').length, (r.filterLog || []).length]);
+  const head = ['no','researcher','participant_id','status','started_at','finished_at','query_count','queries','liked_count','liked_with_query','unliked_count','final_query','liked_files','final_file','final_in_liked_order','hidden_count','hidden_with_query','restored_count','filter_count','alt','round_count','rounds'];
+  const rows = recs.map(r => [r.no, r.researcher || '', r.label, r.status, r.startedAt || '', r.finishedAt || '', (r.queries || []).length, (r.queries || []).map(x => x.q).join(' | '), r.liked.length, r.liked.map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.likeLog || []).filter(e => e.action === '빼기').length, (() => { const f = r.final && r.liked.find(x => x.id === r.final.id); return f && f.qn ? `${f.qn}:${f.q}` : ''; })(), r.liked.map(x => x.name).join('|'), r.final ? r.final.name : '', r.final ? r.liked.findIndex(x => x.id === r.final.id) + 1 : '', (r.hidden || []).length, (r.hidden || []).map(x => `${x.name}@${x.qn ? x.qn + ':' + x.q : '-'}`).join(' | '), (r.hideLog || []).filter(e => e.action === '되돌리기').length, (r.filterLog || []).length, r.alt || 1, (r.rounds || []).length, (r.rounds || []).map(x => `${x.q}=>${x.shown.map(y => y.name).join(' ')}=>${x.picked ? x.picked.name : '-'}`).join(' | ')]);
   return [head.join(','), ...rows.map(r => r.map(cell).join(','))].join('\n');
 }
 async function exportArchiveZip(){

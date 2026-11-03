@@ -16,6 +16,7 @@
 
 - `index.html`: 두 화면으로 가는 링크만 있는 첫 페이지.
 - `search_system.html?view=search` (검색 화면 전용, `SEARCH_PAGE`): 시작 화면(`renderStartUI`)에서 진행자·참여자 ID를 넣고 시작 → 검색 → 완료 화면의 "연구자에게 알려 주세요."를 누르면 다시 시작 화면. 연구자 패널(점 버튼, Ctrl+Shift+R)은 없다.
+- `search_system.html?view=search&alt=2` (ALT2, `ALT2`): 시작 화면은 같고, 검색 → 안 본 사진 4장 중 1장 고르기를 최소 4번 최대 5번 반복한 뒤 고른 사진 중 최종 1장을 고른다. 검색창에는 앞 검색어가 남아 고쳐 쓸 수 있고, 앞 검색어를 몰래 합치지 않는다. 맞는 사진이 0장이면 안내만 하고 횟수에 넣지 않으며, 1~3장이면 `다른 사진`으로 4장을 채운다. 하트·✕·칩·더 보기는 없다. 숫자는 `ALT2_N`, `ALT2_MIN`, `ALT2_MAX`. 고른 사진은 `P.liked`에 넣어 기록·ZIP을 그대로 쓴다. 다른 방식으로 진행 중인 참여자는 시작 화면을 보여 주고, 새로 시작하면 미완료로 기록한다.
 - `search_system.html?view=researcher` (연구자 화면 전용, `RESEARCH_PAGE`): 사진 풀 관리·참여자 기록만. `검색 화면 열기 ↗` 링크, 진행 중인 참여자 표시와 `미완료로 끝내기`(두 번 눌러야 함). 이 창은 진행 상태 `P`를 쓰지 않는다(검색 창의 최신 상태를 덮어쓰지 않게).
 - 주소에 `view`가 없으면 아래처럼 한 창에서 둘 다 쓰는 예전 방식.
 
@@ -37,7 +38,7 @@
 | --- | --- | --- |
 | IndexedDB | DB `room-search-pool`, store `photos` | 사진 레코드 `{id, name, tags[], contains[], blob, thumb, addedAt, fromPool?}`. blob은 긴 변 1600px JPEG, thumb은 420px. 기본 풀 사진은 `fromPool: true`, id는 `pool_` + 파일 이름 해시라 다시 맞춰도 기록의 사진 참조가 유지된다 |
 | localStorage | `rs_pool_ver` | 마지막으로 맞춘 `pool/pool.csv`의 해시. 바뀌면 다음 시작 때 태그를 갱신하고 새 사진을 받고, 빠진 기본 풀 사진은 지운다(연구자가 직접 넣은 사진은 그대로) |
-| localStorage | `rs_pick` | 진행 중 참여자 `P`: `{pid, liked[], hidden[], hideLog[], filterLog[], final, view, active, _sel, startedAt, finishedAt, queries[], likeLog[], archivedId}` |
+| localStorage | `rs_pick` | 진행 중 참여자 `P`: `{pid, alt, liked[], hidden[], hideLog[], filterLog[], rounds[], stage2, final, view, active, _sel, startedAt, finishedAt, queries[], likeLog[], archivedId}` |
 | localStorage | `rs_archive` | 참여자 기록 배열 `ARCH`. 고치기 전에 `reloadArch()`로 다른 창의 최신 기록부터 읽는다 |
 | localStorage | `rs_researcher` | 이 PC의 진행자 이름. 새 기록의 `researcher`, CSV 열, 내보내기 파일 이름에 붙는다 |
 | localStorage | `rs_pool_ping` | IndexedDB를 고칠 때마다 바꾸는 신호. 다른 창이 받아 사진 풀을 다시 읽는다 |
@@ -57,7 +58,9 @@
   "likeLog": [{"action": "담기 | 빼기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 모아 보기", "active": ["그때 켜진 칩"]}],
   "hidden": [{"id": "…", "name": "R010.jpg", "qn": 2, "q": "야경", "hiddenAt": "ISO"}],
   "hideLog": [{"action": "제외 | 되돌리기", "id": "…", "name": "…", "at": "ISO", "qn": 2, "q": "야경", "where": "검색 결과 | 크게 보기 | 제외 목록", "active": ["그때 켜진 칩"]}],
-  "filterLog": [{"action": "켜기 | 끄기", "q": "우드", "active": ["화이트", "우드"], "results": 31, "at": "ISO"}]
+  "filterLog": [{"action": "켜기 | 끄기", "q": "우드", "active": ["화이트", "우드"], "results": 31, "at": "ISO"}],
+  "alt": 2,
+  "rounds": [{"q": "소파", "at": "ISO", "hits": 42, "shown": [{"id": "…", "name": "R010.jpg"}], "picked": {"id": "…", "name": "R010.jpg"}, "pickedAt": "ISO"}]
 }
 ```
 
@@ -66,7 +69,7 @@
 - `queries`는 검색 버튼/Enter를 누를 때마다 쌓이고, 최종 결정 뒤에는 쌓이지 않는다.
 - `liked[].qn/q`는 그 사진을 **마지막으로 담은** 검색이다.
 
-CSV 열: `no, researcher, participant_id, status, started_at, finished_at, query_count, queries, liked_count, liked_with_query, unliked_count, final_query, liked_files, final_file, final_in_liked_order, hidden_count, hidden_with_query, restored_count, filter_count`. 예전 기록에는 `hidden`·`hideLog`·`filterLog`가 없다. 한 칸 안의 여러 값은 ` | `로 잇고, `liked_with_query`는 `사진@검색번호:검색어` 형식이다.
+CSV 열: `no, researcher, participant_id, status, started_at, finished_at, query_count, queries, liked_count, liked_with_query, unliked_count, final_query, liked_files, final_file, final_in_liked_order, hidden_count, hidden_with_query, restored_count, filter_count, alt, round_count, rounds`. `rounds` 칸은 `검색어=>보여 준 사진=>고른 사진`을 ` | `로 잇는다. 예전 기록에는 `hidden`·`hideLog`·`filterLog`·`alt`·`rounds`가 없다. 한 칸 안의 여러 값은 ` | `로 잇고, `liked_with_query`는 `사진@검색번호:검색어` 형식이다.
 
 ## 검색 동작
 
@@ -87,6 +90,8 @@ CSV 열: `no, researcher, participant_id, status, started_at, finished_at, query
 - 삭제처럼 되돌릴 수 없는 동작은 "한 번 더 누르기" 확인을 둔다(`confirm()`은 쓰지 않는다).
 
 ## 남은 일
+
+- [ ] **ALT2 첫 파일럿에서 볼 것**: 4장 안에서 고르는 데 불만이 없는지, 중간에 고른 사진을 최종 화면 전까지 다시 보여 주지 않아도 되는지(AI 그룹은 대화창을 올려 볼 수 있다). 노출을 어떻게 나눠 볼지(양, 반복, 타깃 요소)와 ALT1/ALT2 중 무엇을 쓸지는 아직 정하지 않았다.
 
 - [ ] **사진별 CSV** (제안만 함, 사용자 답 대기): 담은 사진 한 장 = 한 줄. 열 `participant_id, photo, query_no, query, liked_at, where, is_final`. 참여자 기록 탭에 내보내기 버튼으로 추가.
 - 기록은 브라우저 localStorage에만 있으므로 세션마다 기록 ZIP으로 백업하도록 안내되어 있다. 연구자 3명이 각자 PC에서 진행하고(참여자 P01~P12를 미리 나눠 배정), 나중에 의현이 각자의 ZIP을 `기록 불러오기`로 한 화면에 합친다. 새 기록 번호(`no`)는 같은 진행자의 자기 기록만 보고 매긴다(불러온 기록 제외).
